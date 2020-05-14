@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <link href="https://fonts.googleapis.com/css?family=Inter&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.0.0/dist/tf.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <title>Calibrate</title>
+    <style>
+#title{
+    font-family: 'Inter', sans-serif;
+    color: rgb(128, 0, 82);
+}
+button {
+  background-color: rgb(128, 0, 82);
+  border-radius: 8px;
+  border: none;
+  color: white;
+  padding: 15px 32px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 16px;
+  margin: 4px 2px;
+  cursor: pointer;
+}
+    </style>
+
+</head>
+
+<body>
+    <h1 style="text-align: center;" id="title">X,Y Twin</h1>
+    <button id="switch" onclick="show()">Show Twin</button>
+    
+    <div id="map" style="display: none;">
+       
+        <button id="addExample">add example</button>
+        <button id="train">train</button>
+        <br>
+        <canvas onclick="draw(event)" id="myCanvas" width="300" height="445" style="border:1px solid #000000;">
+        </canvas>
+    </div>
+    
+    
+
+    <div id="chart" class="container"></div>
+
+</body>
+<script async>
+  var d = new Date();
+  var x = d.getSeconds() + d.getMinutes() * 60;
+
+  var plotData = [{
+    x: [x],
+    y: [0],
+    mode: 'lines',
+    line: { color: '#0000FF' }
+  },
+  {
+    x: [x],
+    y: [0],
+    mode: 'lines',
+    line: { color: '#FF0000' }
+  },
+  {
+    x: [x],
+    y: [0],
+    mode: 'lines',
+    line: { color: '#00FF00' }
+  }
+  ];
+
+
+  var layout = {
+  yaxis: {range: [45, 65]}
+};
+
+  Plotly.plot('chart', plotData, layout);
+
+
+  function getSensor(name, useToPlot, useToTrain) {
+      var returnVal;
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function () {
+      if (this.readyState == 4 && this.status == 200) {
+        var d = new Date();
+        var xAxis = d.getSeconds() + d.getMinutes() * 60;
+        var yAxis = parseFloat(this.responseText);
+        returnVal =  yAxis;
+        if (useToPlot) {
+          var update = {
+            x: [[xAxis]],
+            y: [[yAxis]]
+          }
+          Plotly.extendTraces('chart', update, [name - 1]);
+        };
+
+      };
+    }
+    xhttp.open("GET", `/s${name}`, useToPlot);
+    xhttp.send();
+    if(useToTrain){
+            console.log(returnVal);
+            return returnVal;
+            
+        }
+        else{
+            return 0.0;
+        };
+  };
+
+  
+  setInterval(function () {
+    getSensor(1, true, false)
+  }, 500);
+
+  setInterval(function () {
+    getSensor(2, true, false)
+  }, 500);
+
+  setInterval(function () {
+    getSensor(3, true, false)
+  }, 500);
+</script>
+
+
+<script async>
+
+function show() {
+  var x = document.getElementById("map");
+  var y = document.getElementById("chart");
+  var z = document.getElementById("switch");
+  if (x.style.display === "none") {
+    x.style.display = "block";
+    y.style.display =  "none";
+    z.innerHTML = "Show Data";
+   
+  } else {
+    x.style.display = "none";
+    y.style.display = "block";
+    z.innerHTML = "Show Twin";
+  }
+}
+
+
+    var canvas = document.getElementById("myCanvas");
+    var context = canvas.getContext("2d");
+    var posx, poxy = 0;
+
+    function draw(e) {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        var pos = getMousePos(canvas, e);
+        posx = pos.x;
+        posy = pos.y;
+        drawCircle(posx, posy, 20, "#000000");
+    }
+
+    function getMousePos(canvas, evt) {
+        var rect = canvas.getBoundingClientRect();
+        return {
+            x: evt.clientX - rect.left,
+            y: evt.clientY - rect.top
+        };
+    }
+
+
+    let model;
+    let labels = [];
+    let data = [];
+    let cavasWidth = 300;
+    let cavasHeight = 445;
+    
+    let start = 50;
+    let range = 10;
+    if (localStorage.getItem("model-1") === null) {
+
+        model = tf.sequential({
+      layers: [
+        tf.layers.dense({ inputShape: [3], units: 9, activation: 'sigmoid' }),
+        tf.layers.dense({ units: 100, activation: 'sigmoid' }),
+        tf.layers.dense({ units: 100, activation: 'sigmoid' }),
+        tf.layers.dense({ units: 100, activation: 'sigmoid' }),
+        tf.layers.dense({ units: 2, activation: 'sigmoid' }),
+      ]
+    });
+    model.compile({
+      optimizer: 'adam',
+      loss: tf.losses.logLoss,
+      metrics: ['accuracy']
+    });
+    }
+    else {
+        const model = loadTfModel('localstorage://model-1');
+    };
+
+    document.getElementById("train").addEventListener("click", function () {
+    train();
+  });
+  document.getElementById("addExample").addEventListener("click", function () {
+    addExample();
+  });
+  async function loadTfModel(name) {
+    return await tf.loadLayersModel(name);
+  }
+
+  function onBatchEnd(batch, logs) {
+    console.log('Accuracy', logs.acc);
+  }
+
+
+    async function addExample() {
+        let s1 = (getSensor(1, false,true)-start)/range;
+        let s2 = (getSensor(2, false,true)-start)/range;
+        let s3 = (getSensor(3, false,true)-start)/range;
+        console.log(s1,s2,s3, posx / cavasWidth, posy / cavasHeight);
+        for(let i =0; i<20; i++){
+        data.push([s1, s2, s3]);
+        //data.push([1,1,1]);
+        labels.push([posx / cavasWidth, posy / cavasHeight]);
+        //console.log(labels);
+    }
+    }
+
+    function predict() {
+        let s1 = (getSensor(1, false,true)-start)/range;
+
+        let s2 = (getSensor(2, false,true)-start)/range;
+        let s3 = (getSensor(3, false,true)-start)/range;
+        
+        t = tf.tensor([[s1,s2,s3]]);
+        //t = tf.tensor([[1,1,1]]);
+        const prediction = model.predict(t);
+        console.log(s1,s2,s3, 'test', prediction);
+        drawPrediction(prediction);
+    }
+
+    
+  function drawCircle(x, y, r, color) {
+    context.fillStyle = color;
+    context.beginPath();
+    context.arc(x, y, r, 0, 2 * Math.PI);
+    context.fill();
+  }
+
+  function drawPrediction(prediction) {
+    const values = Array.from(prediction.dataSync());
+    console.log(values);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    drawCircle(posx, posy, 20, "#000000");
+    drawCircle(values[0] * cavasWidth, values[1] * cavasHeight, 10, "#FF0000");
+   
+  }
+
+
+
+    function train() {
+    const d = tf.tensor(data);
+
+    const l = tf.tensor(labels);
+    console.log(labels);
+    model.fit(d, l, {
+      epochs: 200,
+      batchSize: 50,
+      callbacks: { onBatchEnd }
+    }).then(info => {
+      console.log('Final accuracy', info.history.acc);
+    });
+    setInterval(function () {
+      predict();
+    }, 500);
+
+  };
+
+
+
+</script>
+
+
+
+
+</html>
